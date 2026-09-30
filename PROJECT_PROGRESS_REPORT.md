@@ -1,8 +1,11 @@
 # Project Progress Report: Lightweight ToF–RGB Dense Depth Fusion
 
-**Report date:** 28 September 2026  
-**Project stage:** Working research prototype; final V6 generalisation test still required  
-**Hardware:** Intel RealSense D455f and VL53L5CX 8×8 multi-zone ToF sensor
+| Report field | Details |
+|---|---|
+| Date | 30 September 2026 |
+| Project stage | Operational ROS 2 research prototype; final V6 generalisation test still required |
+| Hardware | Intel RealSense D455f and VL53L5CX 8×8 multi-zone ToF sensor |
+| Purpose | Technical progress review and reproducible handover |
 
 ## Executive summary
 
@@ -13,10 +16,11 @@ VL53L5CX provides only an 8×8 grid, but its valid measurements contain direct d
 information. Our goal is to combine their strengths while keeping the trainable fusion
 network small.
 
-The complete prototype is now operational. The sensors have been mounted and calibrated,
-the ToF firmware preserves up to four distance returns per zone, and 98 compatible real
-captures have been collected across 48 scene groups. A frozen DA3 model provides the dense
-prior. The current V4 fusion network has 599,476 trainable parameters, and V6 adds an
+The complete prototype is now operational in ROS 2 Jazzy. The sensors have been mounted
+and calibrated, and the latest STM32 firmware preserves up to four distance returns per
+zone while publishing at 10 Hz through a CRC32-protected binary protocol. The dataset still
+contains 98 compatible real captures across 48 scene groups. A frozen DA3 model provides
+the dense prior. The V4 fusion network has 599,476 trainable parameters, while V6 adds an
 11,691-parameter full-resolution router for difficult multi-depth regions. D455f aligned
 depth is used only as a training and evaluation reference; it is never given to the fusion
 model at inference time.
@@ -24,14 +28,30 @@ model at inference time.
 On a reused 15-capture development set, V4 reduced all-pixel mean absolute error (MAE) from
 13.89 cm for DA3 to 10.79 cm. V6 further reduced it to 10.67 cm. The V6 improvement is more
 visible inside the ToF footprint and in multi-return regions than over the whole image. A
-live four-panel demonstration is working, although CPU inference is not real-time: the
-quality setting takes about 3.3–4.0 seconds per update, while the fast preview setting takes
-about 0.5–0.8 seconds.
+live ROS 2 demonstration is now working on the laptop's Intel integrated GPU. The ToF topic
+was measured at 10.14 Hz. The fused output normally runs at about 5 FPS; a 30-second test
+averaged 4.51 FPS because one XPU inference pause lasted 1.46 seconds. These are separate
+rates: faster sensor delivery does not make the sequential DA3 and V6 computation run at
+10 FPS.
 
 The result is promising but not yet equivalent to a D435i or D455 depth camera. The main
-remaining requirement is a strictly untouched test set for V6. The current visual
-observation—that V6 is only slightly better than frozen DA3 over the full image—is consistent
-with the measured results and motivates stronger feature-level ToF fusion in the next model.
+remaining scientific requirement is a strictly untouched test set for V6. The current
+visual observation—that V6 is only slightly better than frozen DA3 over the full image—is
+consistent with the measured results and motivates stronger feature-level ToF fusion in a
+future model. The runtime work reported here improves delivery and responsiveness; it does
+not change the previously reported model-accuracy results.
+
+### Update since the 28 September report
+
+- The live application has been separated into ROS 2 camera, serial, fusion and viewer nodes.
+- The VL53L5CX firmware now delivers four-target 8×8 frames at a measured 10.11–10.14 Hz.
+- The deployment viewer now reports a square overlap crop and centre distance; the optional
+  reference mode retains D455f comparison and overlap-only MAE.
+- Prompt construction has been reduced from about 903 ms to 47 ms without changing its
+  pixel values.
+- Steady fused output is around 5 FPS on Intel XPU, although occasional inference pauses
+  reduce the 30-second measured average to 4.51 FPS.
+- The automated verification suite has increased from 105 to 116 passing tests.
 
 ## 1. Research question and motivation
 
@@ -54,22 +74,28 @@ is not presented as a full reproduction of either reference.
 ## 2. Current system
 
 ```text
-RGB image ──> frozen DA3 ──> dense metric-depth prior ───────────┐
-                                                                  │
-8×8 multi-return ToF ──> quality filtering ──> RGB projection ───┤
-                                                                  ▼
-                                               V4 local fusion network
-                                                                  ▼
-                                               V6 pixel-level router
-                                                                  ▼
-                                                final dense depth map
+D455f RGB (30 FPS) ──> frozen DA3 ──> dense metric-depth prior ───┐
+                                                                   │
+VL53L5CX ──> STM32 binary stream ──> ROS /tof/frame ──> rolling    │
+window ──> quality filtering ──> RGB projection ──> cached prompt ┤
+                                                                   ▼
+                                                V4 local fusion network
+                                                                   ▼
+                                                V6 pixel-level router
+                                                                   ▼
+                                dense V6 depth + fusion mask + square crop
+                                                                   │
+                                                                   ▼
+                                                   centre-distance estimate
 
-D455f aligned depth ──> training/evaluation reference only
+D455f aligned depth ──> optional training/evaluation reference only
 ```
 
 The deployed input consists of RGB and live VL53L5CX measurements. DA3, V4 and V6 do not
 receive D455f depth. This separation is important because it prevents the reference camera
-from secretly solving the task during deployment.
+from secretly solving the task during deployment. The fusion mask is formed from valid
+projected ToF coverage and valid V6 depth. When D455f reference evaluation is enabled, its
+invalid or missing pixels are excluded from MAE rather than interpreted as zero distance.
 
 ## 3. Work completed
 
@@ -100,6 +126,24 @@ format. At 8×8 resolution, each zone can preserve up to four native returns tog
 
 This is important at object boundaries. A zone may observe both a near object and a far
 background, so replacing all returns with one average would remove useful information.
+
+The latest firmware and transport configuration is:
+
+- 10 Hz VL53L5CX ranging with a 15 ms integration period;
+- four integrations per 8×8 frame, while retaining four target slots per zone;
+- STM32L476 running from a 32 MHz MSI clock;
+- approximately 1 MHz I²C Fast-mode Plus;
+- interrupt-driven UART at 1,000,000 baud;
+- a 2,896-byte `TOF4_BINARY_V1` frame protected by CRC32; and
+- host-side resynchronisation and backward-compatible parsing of the earlier text protocol.
+
+A connected-board raw serial test recorded 151 frames in 15 seconds, corresponding to
+10.109 Hz. ROS 2 measurements were 10.11–10.14 Hz. Before flashing, the complete 1 MiB MCU
+flash and the original STM32 project were backed up. The exact pre-experiment flash image
+has SHA-256
+`ad953313b21901c84e538c2410e44d412a8aed2d1392d5426ec2d234f6412cdb`.
+The final 10 Hz binary has SHA-256
+`cdc9c104ca77cc61fac771d0265f1b2ad6bad625a05e5d08200fdb555c05f629`.
 
 ### 3.3 Data collection and preparation
 
@@ -143,6 +187,35 @@ The main lesson is that retaining multiple ToF distances is not enough. The diff
 is **candidate-to-pixel assignment**: deciding which physical return belongs to each RGB
 pixel inside a large ToF zone.
 
+### 3.5 ROS 2 deployment and runtime optimisation
+
+The live system has been reorganised as a ROS 2 Jazzy pipeline with separate responsibilities:
+
+- the RealSense driver publishes D455f RGB and, when requested, aligned reference depth;
+- a serial node parses the CRC-protected ToF stream and publishes `/tof/frame`;
+- the fusion node runs frozen DA3, builds or reuses the latest ToF prompt, executes V4/V6,
+  and publishes depth, mask, crop and centre-distance topics; and
+- the viewer subscribes to either the deployment crop or the optional six-panel reference
+  image.
+
+Camera inference is not clocked by ToF arrival. Prompt preparation runs separately, and the
+latest valid prompt is reused until a newer prompt is ready. By default, the prompt is
+rebuilt every five ToF frames, which is approximately 2 Hz with the 10 Hz firmware. This
+keeps the displayed fusion output moving between sensor updates, although it introduces up
+to about 0.5 seconds of prompt latency for a newly moving surface.
+
+Several runtime changes were verified:
+
+- prompt rasterisation was reduced from about 903 ms to 47 ms, with a unit test confirming
+  pixel-equivalent depth, probability, confidence, validity and native-quality rasters;
+- prompt tensors are cached on the Intel XPU and updated in place;
+- large ROS image messages are serialised only when a subscriber exists;
+- DA3 log noise is suppressed during the normal launch; and
+- serial and fusion nodes perform guarded shutdown to avoid double-shutdown errors.
+
+These changes improve throughput and responsiveness without changing checkpoint weights,
+DA3 process resolution or the V6 spatial input size.
+
 ## 4. Main quantitative results
 
 MAE is mean absolute error; lower values are better.
@@ -183,25 +256,67 @@ not measure generalisation.
 The modest full-image gain is expected. The 8×8 ToF footprint covers only part of the image,
 and the safety gate deliberately avoids large corrections when evidence is uncertain.
 
-## 5. Live prototype
+## 5. Live prototype and measured performance
 
-The live program displays four synchronised panels:
+### 5.1 Deployment view
 
-1. D455f RGB;
-2. frozen DA3 depth;
-3. final V6 depth;
-4. D455f aligned reference depth.
+The default ROS 2 launch uses the faster fusion-only path. D455f reference depth, alignment
+and MAE calculation are disabled. The viewer displays a square crop of V6 depth within the
+valid ToF fusion footprint, with a centre crosshair, an 11×11 median centre-distance
+estimate and the measured output FPS. The crop is the smallest square that contains the
+fusion footprint; it is not stretched into a rectangle, and invalid black pixels outside
+the crop are not included merely to fill the panel.
 
-All depth panels use a common metric colour scale. The D455f reference is used only for
-display and live error reporting. On the current CPU laptop:
+The primary runtime topics are:
 
-- DA3 process resolution 504: approximately 3.3–4.0 seconds per update;
+- `/fusion/v6_fusion_crop_m`: square V6 depth crop used by the viewer;
+- `/fusion/v6_fusion_depth_m`: full-resolution V6 depth masked by ToF coverage;
+- `/fusion/fusion_mask`: exact ToF/V6 fusion mask; and
+- `/fusion/center_distance_m`: centre-region median depth.
+
+### 5.2 Reference and overlap view
+
+The optional reference mode displays six synchronised panels and publishes DA3, V4, V6,
+ToF, D455f and overlap diagnostics. The overlap MAE is calculated only where all required
+values are valid. In particular, pixels with zero, NaN or otherwise invalid D455f depth are
+ignored. This prevents D455f holes from being counted as large depth errors.
+
+The displayed fusion region belongs to V6 and projected ToF coverage. D455f depth does not
+control whether fusion occurs; it is used only to compare corresponding pixels when
+reference mode is enabled.
+
+### 5.3 Runtime measurements
+
+The earlier CPU viewer remains a useful historical baseline:
+
+- DA3 process resolution 504: approximately 3.3–4.0 seconds per update; and
 - DA3 process resolution 252: approximately 0.5–0.8 seconds per update.
 
-The faster setting is appropriate for demonstrations, but it loses some boundary detail.
-The live result currently looks only slightly better than frozen DA3 over the full image.
-This qualitative observation agrees with the development table: the strongest improvements
-are local, particularly where valid ToF measurements or multiple returns are available.
+The current ROS 2 deployment uses `process_res=168`, a 160×120 V6 input and the Intel
+integrated GPU through PyTorch XPU. Isolated DA3-Large inference at this setting was about
+0.094 seconds on XPU and 0.262 seconds on CPU after warm-up. The complete pipeline is slower
+because DA3 and V6 run sequentially and the result also requires preprocessing, tensor
+transfer, prompt fusion, resizing and ROS publication.
+
+The connected-system measurements were:
+
+| Measurement | Result |
+|---|---:|
+| Raw/ROS ToF rate | 10.11–10.14 Hz |
+| Normal steady fused output | approximately 5 FPS |
+| 30-second fused-output average | 4.51 FPS |
+| Longest pause in that sample | 1.46 seconds |
+| Prompt construction before optimisation | approximately 903 ms |
+| Prompt construction after optimisation | approximately 47 ms |
+
+The occasional long pause remains associated with DA3/XPU execution. Reducing prompt
+frequency did not remove it, and the kernel reported no GPU reset or fault during the
+diagnostic check. Therefore, the current system should be described as approximately 5 FPS
+in steady operation, not as a guaranteed 10 FPS fusion system.
+
+The visual result still looks only slightly better than frozen DA3 over the whole image.
+This agrees with the development results: the strongest improvements are local, especially
+where valid ToF measurements or multiple returns are available.
 
 ## 6. What did not work, and why it matters
 
@@ -233,6 +348,10 @@ assignment, boundary supervision and simulation-to-real transfer are more import
 6. **Limited correction outside ToF coverage:** the safe V6 design keeps V4 unchanged there.
 7. **No direct D435i benchmark:** the project has not yet demonstrated the target of reaching
    90% of D435i performance.
+8. **Runtime variability:** steady fusion is close to 5 FPS, but occasional Intel XPU pauses
+   reduce the long-window average and remain under investigation.
+9. **Prompt freshness trade-off:** rebuilding the prompt every five ToF frames improves
+   throughput but can delay the response to a newly moving surface by about 0.5 seconds.
 
 ## 8. Next steps
 
@@ -261,12 +380,26 @@ keeping DA3 frozen. It will require more varied real boundary data and careful s
 real fine-tuning. An H100 would speed up this larger experiment, but better data and a clean
 test protocol remain more important than raw compute.
 
+### Runtime engineering
+
+The next deployment task is to profile the remaining irregular XPU pause around DA3 model
+execution. Any proposed optimisation should be assessed against both output rate and depth
+accuracy. Lower DA3 resolutions or a smaller backbone may increase FPS, but they can reduce
+small-object and boundary quality. Optimisations that preserve the current model and
+resolution should therefore be tested first.
+
 ### Hardware comparison
 
 A D435i should be recorded in the same static scenes and mapped into the same RGB coordinate
 system. Only then can the “90% of D435i performance” target be defined and measured fairly.
 
 ## 9. Reproducibility and current artifacts
+
+This public repository currently contains the project documentation. The paths below refer
+to the operational local project tree and identify the exact implementation and artifacts
+used for the reported results; they are not all included in this documentation repository.
+
+### 9.1 Model and calibration artifacts
 
 - Final V6 checkpoint:  
   `outputs/plane_v1/prompt_adapter_v6_boundary_router_all98_deployment/checkpoint_calibrated.pt`
@@ -275,25 +408,78 @@ system. Only then can the “90% of D435i performance” target be defined and m
 - V6 model: `src/prompt_adapter_v6.py`
 - V6 training: `src/train_prompt_adapter_v6.py`
 - V6 inference: `src/run_prompt_adapter_v6.py`
-- Live comparison: `src/live_v6_viewer.py`
+- Live comparison and shared fusion worker: `src/live_v6_viewer.py`
 - Mapping configuration: `config/tof_rgb_mapping_plane_v1.json`
-- Environment guide: [`DOCKER.md`](DOCKER.md)
+- Environment guide: `DOCKER.md`
 
-The current codebase passes **105 automated unit tests**.
+### 9.2 ROS 2 and firmware artifacts
 
-To run the fast live demonstration:
+- ROS 2 package: `ros2_ws/src/d455_tof_fusion`
+- ROS 2 messages: `ros2_ws/src/d455_tof_msgs`
+- Pipeline launch file: `ros2_ws/src/d455_tof_fusion/launch/live_v6_pipeline.launch.py`
+- Build helper: `scripts/build_ros2.sh`
+- Run helper: `scripts/run_ros2_pipeline.sh`
+- Accelerator check: `scripts/check_accelerator.sh`
+- 10 Hz firmware source: `firmware/stm32_tof_10hz`
+- Final firmware binary: `firmware_builds/stm32_tof_10hz_4target_20260930.bin`
+- Pre-experiment recovery instructions: `firmware_backups/pre_10hz_20260930/RESTORE.md`
+
+The current codebase passes **116 automated unit tests**. The test set includes binary
+stream fragmentation, CRC failure and resynchronisation, compatibility with the earlier
+text protocol, four-target preservation, overlap-only MAE, square crop behaviour, and
+pixel equivalence between the original and optimised prompt rasterisers.
+
+### 9.3 Running the ROS 2 pipeline
+
+Build the workspace once:
+
+```bash
+./scripts/build_ros2.sh
+```
+
+Close RealSense Viewer and any previous camera or serial process, then run:
+
+```bash
+./scripts/run_ros2_pipeline.sh \
+  port:=/dev/ttyACM0 \
+  baud:=1000000 \
+  device:=xpu \
+  process_res:=168
+```
+
+A stable `/dev/serial/by-id/...` path is preferable to `/dev/ttyACM0` when available. To
+enable D455f reference depth, overlap statistics, MAE and the six-panel comparison view:
+
+```bash
+./scripts/run_ros2_pipeline.sh \
+  port:=/dev/ttyACM0 \
+  baud:=1000000 \
+  device:=xpu \
+  process_res:=168 \
+  enable_reference_outputs:=true \
+  viewer_topic:=/fusion/comparison
+```
+
+The earlier standalone viewer remains available with the new binary protocol:
 
 ```bash
 PYTHONPATH=src .venv312/bin/python src/live_v6_viewer.py \
-  --port /dev/ttyACM0 --baud 115200 --device cpu --process-res 252
+  --port /dev/ttyACM0 --baud 1000000 --device xpu --process-res 168
 ```
+
+To use the earlier ASCII firmware, the board must first be restored from the corresponding
+backup and the host baud rate must be changed back to 115200.
 
 ## Current conclusion
 
 The project has progressed from a simple scale-correction idea to a complete hardware,
-data, training, evaluation and live-inference pipeline. Sparse ToF information clearly helps
-in its valid coverage area, and explicit multi-return routing improves difficult regions.
-However, the latest V6 gain over V4 is small over the full image, and fine boundaries remain
-the central weakness. The project is technically functional and scientifically informative,
-but a new untouched test and a stronger feature-level fusion method are needed before making
-claims comparable with a commercial RGB-D camera.
+data, training, evaluation and ROS 2 live-inference pipeline. Sparse ToF information clearly
+helps within valid coverage, and explicit multi-return routing improves difficult regions.
+The upgraded sensor path now delivers 10 Hz ToF data without blocking camera inference, and
+the full fusion pipeline normally produces about 5 FPS on the integrated Intel GPU.
+
+However, the latest V6 gain over V4 remains small over the whole image, fine boundaries are
+still the central modelling weakness, and occasional XPU pauses reduce runtime consistency.
+The project is technically functional and scientifically informative, but a new untouched
+test set and a stronger feature-level fusion method are still required before making claims
+comparable with a commercial RGB-D camera.
