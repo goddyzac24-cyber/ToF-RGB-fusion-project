@@ -66,9 +66,9 @@ does not define the fusion result; it is added only when reference statistics ar
 - [Latest English project report](PROJECT_PROGRESS_REPORT.md) — full architecture,
   calibration, data, model history, quantitative results, runtime pipeline, limitations,
   and reproducibility notes.
-- [中文项目报告](PROJECT_PROGRESS_REPORT_ZH.md) — the detailed Chinese report from
-  28 September 2026. It remains useful for the research history but does not include the
-  final 10 Hz firmware and ROS 2 runtime update.
+- [Latest Chinese project report](PROJECT_PROGRESS_REPORT_ZH.md) — the updated Chinese
+  version covering the same hardware, ROS 2 pipeline, measurements, limitations and
+  reproducibility information.
 
 ## Scientific scope
 
