@@ -60,6 +60,9 @@ does not define the fusion result; it is added only when reference statistics ar
 
 ## Documentation
 
+- [New user operating guide](NEW_USER_OPERATING_GUIDE.md) — hardware checks, build and
+  launch commands, viewer modes, ROS topic checks, recording, safe shutdown and common
+  troubleshooting.
 - [Latest English project report](PROJECT_PROGRESS_REPORT.md) — full architecture,
   calibration, data, model history, quantitative results, runtime pipeline, limitations,
   and reproducibility notes.
