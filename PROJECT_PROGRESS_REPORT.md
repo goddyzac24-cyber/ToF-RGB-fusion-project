@@ -18,12 +18,12 @@ network small.
 
 The complete prototype is now operational in ROS 2 Jazzy. The sensors have been mounted
 and calibrated, and the latest STM32 firmware preserves up to four distance returns per
-zone while publishing at 10 Hz through a CRC32-protected binary protocol. The dataset still
-contains 98 compatible real captures across 48 scene groups. A frozen DA3 model provides
-the dense prior. The V4 fusion network has 599,476 trainable parameters, while V6 adds an
-11,691-parameter full-resolution router for difficult multi-depth regions. D455f aligned
-depth is used only as a training and evaluation reference; it is never given to the fusion
-model at inference time.
+zone while publishing at 10 Hz through a CRC32-protected binary protocol. The documented
+dataset contains 98 compatible real captures assigned to 48 manifest-defined scene groups.
+A frozen DA3 model provides the dense prior. The V4 fusion network has 599,476 trainable
+parameters, while V6 adds an 11,691-parameter full-resolution router for difficult
+multi-depth regions. D455f aligned depth is used only as a training and evaluation
+reference; it is never given to the fusion model at inference time.
 
 On a reused 15-capture development set, V4 reduced all-pixel mean absolute error (MAE) from
 13.89 cm for DA3 to 10.79 cm. V6 further reduced it to 10.67 cm. The V6 improvement is more
@@ -127,7 +127,7 @@ format. At 8×8 resolution, each zone can preserve up to four native returns tog
 This is important at object boundaries. A zone may observe both a near object and a far
 background, so replacing all returns with one average would remove useful information.
 
-The latest firmware and transport configuration is:
+The latest firmware and transport configuration is as follows:
 
 - 10 Hz VL53L5CX ranging with a 15 ms integration period;
 - four integrations per 8×8 frame, while retaining four target slots per zone;
@@ -147,10 +147,20 @@ The final 10 Hz binary has SHA-256
 
 ### 3.3 Data collection and preparation
 
-The current real dataset contains **98 compatible captures from 48 scene groups**. It
-includes planar boards, two- and three-layer arrangements, small objects, dark objects,
-chairs, oblique walls and off-centre targets. Repeated frames were collected to measure
-stability rather than selecting one favourable reading.
+The current real dataset contains **98 unique compatible captures assigned to 48
+manifest-defined scene groups**. This count was checked directly against the eight real-data
+manifests used by the all-data fit: 28 calibration/fusion captures in 10 groups, 45 captures
+from three 15-capture development sets in 15 groups, and 25 additional calibration and
+mapping captures carrying 25 group labels. Two labels in the last set already occur in the
+first set, giving 48 unique labels rather than 50.
+
+Here, a *scene group* is a dataset split identifier, normally formed by removing the repeat
+suffix from a case name. It must not be interpreted as 48 completely independent rooms or
+object arrangements: some calibration groups represent the same rig or board at different
+distances, positions or poses. The dataset includes planar boards, two- and three-layer
+arrangements, small objects, dark objects, chairs, oblique walls and off-centre targets.
+Repeated captures were collected to measure stability rather than selecting one favourable
+reading.
 
 The training pipeline also includes **200 public DIODE RGB-D images**. Dense public ground
 truth is converted into simulated 8×8 multi-return prompts using a simulator profile fitted
@@ -376,9 +386,9 @@ If frozen testing confirms that V6 gives only a small gain, the most valuable ar
 change is **ToF-conditioned feature fusion**. Instead of making only a final correction to
 the depth map, ToF tokens would guide high-resolution image features earlier in a lightweight
 decoder or propagation network. This is closer to DELTAR's learned reasoning while still
-keeping DA3 frozen. It will require more varied real boundary data and careful simulation-to-
-real fine-tuning. An H100 would speed up this larger experiment, but better data and a clean
-test protocol remain more important than raw compute.
+keeping DA3 frozen. It will require more varied real boundary data, careful
+simulation-to-real fine-tuning and a clean test protocol. An H100 would speed up this larger
+experiment, but better data and evaluation design remain more important than raw compute.
 
 ### Runtime engineering
 
