@@ -295,7 +295,55 @@ The displayed fusion region belongs to V6 and projected ToF coverage. D455f dept
 control whether fusion occurs; it is used only to compare corresponding pixels when
 reference mode is enabled.
 
-### 5.3 Runtime measurements
+### 5.3 Example outputs and reading guide
+
+#### Deployment output
+
+![Example V6 fused-depth deployment view](docs/images/v6_fusion_deployment_example.png)
+
+*Figure 1. Example of the normal fusion-only view. The square panel contains only the V6
+depth crop associated with valid projected ToF coverage.*
+
+The example should be read as follows:
+
+- `Center 0.88 m` is the median valid V6 depth inside the 11×11 region around the white
+  crosshair. It is not the depth of every pixel in the person.
+- `6.0 FPS` is the recent display/output rate for this moment. It is an instantaneous
+  operating value, not the longer 30-second average reported below.
+- With the default fixed 0.2–3.0 m scale, red and orange indicate nearer surfaces,
+  yellow/green indicate intermediate distances, and cyan/blue/purple indicate farther
+  surfaces. Colour represents distance, not confidence or object class.
+- The rectangular camera image has been cropped to the smallest square containing the
+  fusion footprint. This display crop must not be interpreted as the full camera field of
+  view.
+
+#### Six-panel reference output
+
+![Example six-panel V6 reference view](docs/images/v6_six_panel_reference_example.png)
+
+*Figure 2. Example reference-mode output for one frame. The displayed 2.7 cm V6 MAE is a
+single-frame diagnostic over valid overlap pixels, not a final test-set result.*
+
+The six panels, from left to right, are:
+
+1. **D455f RGB:** the colour image supplied to frozen DA3.
+2. **Frozen DA3:** the dense monocular baseline. In this example its overlap MAE is 5.1 cm.
+3. **Final V6 output:** the fused dense estimate. Its overlap MAE is 2.7 cm for this frame.
+4. **D455f aligned reference:** reference depth on the same 0.2–3.0 m colour scale. Black
+   pixels are invalid reference values and are excluded from MAE.
+5. **D455f + ToF overlap:** green means both projected ToF and D455f depth are valid;
+   magenta means ToF is valid but D455f has no valid reference depth. The shown 89.7% is the
+   fraction of the valid ToF footprint that also has valid D455f reference depth.
+6. **V6 overlap crop:** the V6 result shown only around the valid evaluation footprint.
+
+`delta -2.4 cm better` means `V6 MAE - DA3 MAE = 2.7 - 5.1 = -2.4 cm`; a negative delta is
+an improvement. The bottom-line averages (`ToF 0.75`, `V6 1.06`, `D455f 1.05 m`) are mean
+depths over the valid overlap, not error values. The separate MAE values measure disagreement
+with D455f. Raw ToF can show a large error in a mixed foreground/background region because
+each ToF zone covers many RGB pixels. Any formal conclusion must aggregate the predefined
+untouched test set rather than selecting a favourable screenshot.
+
+### 5.4 Runtime measurements
 
 The earlier CPU viewer remains a useful historical baseline:
 
